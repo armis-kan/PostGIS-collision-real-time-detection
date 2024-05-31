@@ -1,0 +1,5 @@
+# Ignore environment settings file
+.env
+
+# Ignore IDE settings folder
+.idea/
