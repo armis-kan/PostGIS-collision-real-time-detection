@@ -12,12 +12,12 @@ if len(arguments) > 2 or len(arguments) == 1:
 
 traces_file = arguments[1]
 
-
+# main.py
 def notification_listener():
     """Funkcija koja inicira slušanje notifikacija iz baze podataka."""
 
     print()
-    channels = ["wrong_direction_channel", "risk_of_crash_channel"]
+    channels = ["wrong_direction_channel", "vehicle_approach_warning_channel"]
     db_conn.listen_notifications(channels)
 
 
