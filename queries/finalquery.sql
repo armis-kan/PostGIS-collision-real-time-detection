@@ -9,7 +9,7 @@ DROP FUNCTION IF EXISTS get_side_of_road(geometry, geometry);
 
 -- Funkcije za obavještavanje
 DROP FUNCTION IF EXISTS notify_wrong_direction(bigint, time, text, geometry);
-DROP FUNCTION IF EXISTS notify_risk_of_crash(bigint, bigint, time, geometry);
+DROP FUNCTION IF EXISTS notify_vehicle_approaching(bigint, bigint, time, geometry);
 
 -- Okidač
 DROP TRIGGER IF EXISTS vehicle_direction_trigger ON vehicle_gps_datas;
@@ -86,7 +86,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Obavještavanje o riziku od sudara
-CREATE OR REPLACE FUNCTION notify_risk_of_crash(
+CREATE OR REPLACE FUNCTION notify_vehicle_approaching(
     vehicle_id bigint,
     nearby_vehicle_id bigint,
     moment time,
@@ -124,9 +124,9 @@ END IF;
 
     -- Pošalji obavijest
     IF vehicles_in_radius <> '' THEN
-        PERFORM pg_notify('risk_of_crash_channel', '[POTENTIAL CRASH]: Vehicle ' || vehicle_id || ' is within 5 meters of vehicle ' || nearby_vehicle_id || ' at ' || moment || '. [NEARBY VEHICLES]: ' || vehicles_in_radius);
+        PERFORM pg_notify('vehicle_approach_warning_channel', '[APPROACHING WARNING]: Vehicle ' || vehicle_id || ' is within 10 meters of vehicle ' || nearby_vehicle_id || ' at ' || moment || '. [NEARBY VEHICLES]: ' || vehicles_in_radius);
 ELSE
-        PERFORM pg_notify('risk_of_crash_channel', '[POTENTIAL CRASH]: Vehicle ' || vehicle_id || ' is within 5 meters of vehicle ' || nearby_vehicle_id || ' at ' || moment || '. [NEARBY VEHICLES]: NONE');
+        PERFORM pg_notify('vehicle_approach_warning_channel', '[APPROACHING WARNING]: Vehicle ' || vehicle_id || ' is within 10 meters of vehicle ' || nearby_vehicle_id || ' at ' || moment || '. [NEARBY VEHICLES]: NONE');
 END IF;
 
 END;
@@ -235,7 +235,7 @@ END IF;
     IF nearby_vehicle.vehicle_id IS NOT NULL THEN
 SELECT * INTO nearby_nearest_road FROM get_nearest_road(nearby_vehicle.location_geometry);
 IF nearby_nearest_road.road_segment_id = nearest_road.road_segment_id THEN
-            PERFORM notify_risk_of_crash(NEW.vehicle_id, nearby_vehicle.vehicle_id, nearby_vehicle.time, NEW.location_geometry);
+            PERFORM notify_vehicle_approaching(NEW.vehicle_id, nearby_vehicle.vehicle_id, nearby_vehicle.time, NEW.location_geometry);
 END IF;
 END IF;
 
@@ -262,7 +262,6 @@ IF oneway_from_table IS NULL OR oneway_from_table = 'no' THEN
         duration := EXTRACT(EPOCH FROM (end_time - start_time));
         PERFORM pg_notify('testing_channel', '[TESTING]: Processing (two-way) direction for vehicle ' || NEW.vehicle_id || ' took ' || duration || ' seconds.');
 
-		side_of_road := get_side_of_road(road_segment_geometry, NEW.location_geometry);
 
 SELECT INTO msg CASE
             WHEN side_of_road = 'right' THEN
