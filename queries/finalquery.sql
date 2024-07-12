@@ -30,8 +30,8 @@ RETURN QUERY
     ORDER BY vehicle_id, time DESC
   )
 SELECT vehicle_id, loc
-FROM latest_locations
-WHERE ST_DWithin(loc, vehicle_location, search_radius);
+    FROM latest_locations
+    WHERE ST_DWithin(loc, vehicle_location, search_radius);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -105,7 +105,7 @@ BEGIN
     -- Pronađi vozila unutar radijusa od 200m
 FOR nearby_vehicles IN
 SELECT DISTINCT v.id_vehicle
-FROM find_nearby_vehicles(vehicle_location, 200.00) AS v -- in meters
+FROM find_nearby_vehicles(vehicle_location, 200.00) AS v -- u metrima
     LOOP
         IF nearby_vehicles.id_vehicle::text != vehicle_id::text AND nearby_vehicles.id_vehicle::text != ALL(vehicle_ids) THEN
             vehicles_in_radius := vehicles_in_radius || nearby_vehicles.id_vehicle || ', ';
@@ -137,10 +137,11 @@ CREATE OR REPLACE FUNCTION get_nearest_road(vehicle_point geometry)
 RETURNS TABLE(road_segment_id bigint, distance double precision, road_way geometry) AS $$
 BEGIN
 RETURN QUERY
+
 SELECT osm_id, ST_Distance(vehicle_point, way) as distance, way as road_way
-FROM planet_osm_roads
-WHERE highway IS NOT NULL
-ORDER BY vehicle_point <-> way
+    FROM planet_osm_roads
+    WHERE highway IS NOT NULL
+    ORDER BY vehicle_point <-> way
     LIMIT 1;
 END;
 $$ LANGUAGE plpgsql;
@@ -208,9 +209,9 @@ nearby_vehicle RECORD;
 BEGIN
     -- Odredi prethodnu lokaciju vozila
 SELECT location_geometry INTO previous_location
-FROM vehicle_gps_datas
-WHERE vehicle_id = NEW.vehicle_id
-ORDER BY time DESC
+    FROM vehicle_gps_datas
+    WHERE vehicle_id = NEW.vehicle_id
+    ORDER BY time DESC
     LIMIT 1 OFFSET 1;
 
 -- Ako je ovo prva lokacija vozila, preskoči provjeru
@@ -222,8 +223,8 @@ END IF;
 SELECT vehicle_id, time, location_geometry INTO nearby_vehicle
 FROM vehicle_gps_datas
 WHERE vehicle_id != NEW.vehicle_id
-  AND ST_Distance(NEW.location_geometry, location_geometry) < 5
-  AND ABS(EXTRACT(EPOCH FROM (NEW.time - time))) <= 2;
+  AND ST_Distance(NEW.location_geometry, location_geometry) < 10
+  AND ABS(EXTRACT(EPOCH FROM (NEW.time - time))) <= 3;
 
 -- Pronađi najbližu cestu
 SELECT * INTO nearest_road FROM get_nearest_road(NEW.location_geometry);
@@ -231,7 +232,7 @@ IF nearest_road IS NULL THEN
         RETURN NEW;
 END IF;
 
-    -- Ako su oba vozila na istoj cesti, obavijesti o mogućem sudaru
+    -- Ako su oba vozila na istoj cesti, obavijesti o mogućem približavanju vozila
     IF nearby_vehicle.vehicle_id IS NOT NULL THEN
 SELECT * INTO nearby_nearest_road FROM get_nearest_road(nearby_vehicle.location_geometry);
 IF nearby_nearest_road.road_segment_id = nearest_road.road_segment_id THEN
@@ -243,8 +244,8 @@ END IF;
 
     -- Odredi da li se vozilo kreće u ispravnom smjeru
 SELECT ST_Azimuth(ST_StartPoint(way), ST_EndPoint(way)), oneway INTO road_direction, oneway_from_table
-FROM planet_osm_roads
-WHERE osm_id = nearest_road.road_segment_id;
+    FROM planet_osm_roads
+    WHERE osm_id = nearest_road.road_segment_id;
 vehicle_direction := ST_Azimuth(previous_location, NEW.location_geometry);
 
     end_time := clock_timestamp();
@@ -252,8 +253,8 @@ vehicle_direction := ST_Azimuth(previous_location, NEW.location_geometry);
     PERFORM pg_notify('testing_channel', '[TESTING]: Processing (one-way) direction for vehicle ' || NEW.vehicle_id || ' took ' || duration || ' seconds.');
 
 SELECT way INTO road_segment_geometry
-FROM planet_osm_roads
-WHERE osm_id = nearest_road.road_segment_id;
+    FROM planet_osm_roads
+    WHERE osm_id = nearest_road.road_segment_id;
 
 IF oneway_from_table IS NULL OR oneway_from_table = 'no' THEN
         start_time := clock_timestamp();
@@ -263,29 +264,30 @@ IF oneway_from_table IS NULL OR oneway_from_table = 'no' THEN
         PERFORM pg_notify('testing_channel', '[TESTING]: Processing (two-way) direction for vehicle ' || NEW.vehicle_id || ' took ' || duration || ' seconds.');
 
 
-SELECT INTO msg CASE
-            WHEN side_of_road = 'right' THEN
-                '' -- Vozilo je u točnom smjeru
-            ELSE
-                CASE
-                    WHEN ABS(vehicle_direction - road_direction) < PI() / 4 THEN -- Provjera smjera
-                        '[WRONG-WAY]: Vehicle ' || NEW.vehicle_id || ' is in the wrong (two-way) direction at ' || NEW.time
-                    ELSE
-                        '' -- Vozilo je u točnom smjeru
-END
-END;
-ELSE
-SELECT INTO msg CASE
-				WHEN ABS(vehicle_direction - road_direction) < PI() / 2 THEN
-					'' -- Vozilo je u točnom smjeru
-				ELSE
-					'[WRONG-WAY]: Vehicle ' || NEW.vehicle_id || ' is in the wrong direction at ' || NEW.time
-END;
-END IF;
+SELECT INTO msg 
+    CASE
+        WHEN side_of_road = 'right' THEN
+            '' -- Vozilo je u točnom smjeru
+        ELSE
+            CASE
+                WHEN ABS(vehicle_direction - road_direction) < PI() / 4 THEN -- Provjera smjera
+                    '[WRONG-WAY]: Vehicle ' || NEW.vehicle_id || ' is in the wrong (two-way) direction at ' || NEW.time
+                ELSE
+                    '' -- Vozilo je u točnom smjeru
+            END
+        END;
+    ELSE
+        SELECT INTO msg CASE
+		    WHEN ABS(vehicle_direction - road_direction) < PI() / 2 THEN
+				'' -- Vozilo je u točnom smjeru
+			ELSE
+				'[WRONG-WAY]: Vehicle ' || NEW.vehicle_id || ' is in the wrong direction at ' || NEW.time
+            END;
+    END IF;
 
     IF msg <> '' THEN
         PERFORM notify_wrong_direction(NEW.vehicle_id, NEW.time, msg, NEW.location_geometry);
-END IF;
+    END IF;
 
 RETURN NEW;
 END;
